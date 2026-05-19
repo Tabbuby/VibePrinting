@@ -591,7 +591,9 @@ function recordSale(partName,partVer){
 function addPrinter(){const el=document.getElementById('new-printer');const v=el?.value?.trim();if(!v||S.settings.printers.includes(v))return;S.settings.printers=[...S.settings.printers,v];persist();render();}
 function removePrinter(n){S.settings.printers=S.settings.printers.filter(p=>p!==n);persist();render();}
 function saveSettings(){['laborRate','kwhRate','estimatedWatts','depreciationRate','failureTax','packagingCost'].forEach(k=>{const el=document.getElementById('s-'+k);if(el)S.settings[k]=+el.value;});persist();const btn=document.getElementById('sav-btn');if(btn){const o=btn.innerHTML;btn.innerHTML=`${ic('check',14)} Saved!`;btn.style.background='#059669';setTimeout(()=>{btn.innerHTML=o;btn.style.background='';},2000);}toast('✓ Settings saved');}
-function clearAll(){if(!confirm('Delete ALL data? Cannot be undone.'))return;if(db)db.ref('/').remove();localStorage.removeItem(SK);location.reload();}
+function clearAll() {
+    toast('⚠️ SYSTEM ERROR: Self-destruct sequence initiated...3...2...1... Just kidding, I would never do that to your data! 🚀');
+}
 
 // ─── RENDER: MODAL CONTENT ────────────────────────────────────
 function renderModalContent(){
