@@ -886,7 +886,7 @@ function renderInventory(){
   // Subtract sales
   stockSales.forEach(s=>{
     const key=`${s.partName.trim()}|||${s.partVersion.trim()}`;
-    if(products[key])products[key].soldQty=(products[key].soldQty||0)+s.quantity;
+    if(products[key]) products[key].soldQty = (products[key].soldQty || 0) + (+s.quantity || 0);
   });
   const productList=Object.values(products).map(p=>({...p,soldQty:p.soldQty||0,inStock:p.totalQty-(p.soldQty||0)}));
 
