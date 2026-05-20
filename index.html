@@ -276,6 +276,7 @@ function fbInit() {
       currentUser = user;
       if (user) {
         // Logged in — hide auth screen, start DB sync
+        loadDone = false; // reset so hideLoading() fires again after DB sync
         document.getElementById('auth-screen')?.classList.add('gone');
         startDBSync();
         updateUserBadge(user.email);
