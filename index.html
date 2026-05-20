@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;font-family:'JetBrains Mono','Consolas','Courier New',monospace;}
 body{background:#020617;color:#e2e8f0;min-height:100vh;}
@@ -199,12 +200,50 @@ td{font-size:12px;padding:9px 10px;border-bottom:1px solid rgba(30,41,59,.5);ver
 .src-pill-stock{background:rgba(167,139,250,.1);color:#a78bfa;border:1px solid rgba(167,139,250,.3);font-size:10px;padding:1px 7px;border-radius:99px;}
 /* Implied shipping colour */
 .ship-pos{color:#34d399;}.ship-neg{color:#fbbf24;}.ship-zero{color:#64748b;}
+/* Auth screen */
+.auth-screen{position:fixed;inset:0;z-index:200;background:#020617;display:flex;align-items:center;justify-content:center;padding:16px;}
+.auth-box{background:#0f172a;border:1px solid #334155;border-radius:16px;padding:32px;width:100%;max-width:380px;}
+.auth-title{font-size:18px;font-weight:700;color:#e2e8f0;margin-bottom:4px;}
+.auth-sub{font-size:12px;color:#475569;margin-bottom:24px;}
+.auth-err{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:#f87171;font-size:12px;padding:10px 12px;border-radius:8px;margin-bottom:12px;display:none;}
+.auth-btn{width:100%;padding:11px;border-radius:10px;border:none;background:#10b981;color:#020617;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:8px;transition:background .15s;}
+.auth-btn:hover{background:#34d399;}
+.auth-btn:disabled{background:#334155;color:#64748b;cursor:not-allowed;}
+.auth-screen.gone{display:none;}
 </style>
 </head>
 <body>
 <div id="loading" class="loading"><div class="loader"></div><p style="font-size:11px;color:#475569;letter-spacing:.15em;">CONNECTING TO FIREBASE…</p></div>
 <div id="toast" class="toast gone"></div>
 <div id="root"></div>
+<div id="auth-screen" class="auth-screen">
+  <div class="auth-box">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
+      <div style="background:#10b981;padding:10px;border-radius:10px;display:flex;color:#020617;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+      </div>
+      <div>
+        <p class="auth-title">PrintOps ERP</p>
+        <p class="auth-sub">Sign in to access your dashboard</p>
+      </div>
+    </div>
+    <div id="login-err" class="auth-err"></div>
+    <div style="margin-bottom:10px;">
+      <label class="lbl">Email</label>
+      <input id="login-email" class="inp" type="email" placeholder="you@email.com"
+        onkeydown="if(event.key==='Enter')document.getElementById('login-pass').focus()">
+    </div>
+    <div style="margin-bottom:4px;">
+      <label class="lbl">Password</label>
+      <input id="login-pass" class="inp" type="password" placeholder="••••••••"
+        onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button id="login-btn" class="auth-btn" onclick="doLogin()">Sign In</button>
+    <p style="font-size:10px;color:#334155;text-align:center;margin-top:16px;">
+      PrintOps ERP · Private Business Tool
+    </p>
+  </div>
+</div>
 <script>
 // ╔══════════════════════════════════════════════════════════════╗
 // ║  FIREBASE CONFIG                                             ║
@@ -222,49 +261,74 @@ const FB = {
   appId:             "1:606784177437:web:43257354f856692fd70df4",
 };
 
-let db=null, fbLive=false, fbOK=false, skipNext=false, loadDone=false;
+let currentUser = null;
 
 function fbInit() {
-  const needsSetup = FB.apiKey === 'PASTE_API_KEY_HERE';
-  if (needsSetup) {
-    hideLoading('local');
-    return;
-  }
+  if (FB.apiKey === 'PASTE_API_KEY_HERE') { hideLoading(); return; }
   try {
     firebase.initializeApp(FB);
     db = firebase.database();
+    const auth = firebase.auth();
 
-    // Connection monitor
-    db.ref('.info/connected').on('value', snap => {
-      fbLive = snap.val() === true;
-      fbOK   = true;
-      updateDot();
+    // Watch auth state — this fires first on load
+    auth.onAuthStateChanged(user => {
+      currentUser = user;
+      if (user) {
+        // Logged in — hide auth screen, start DB sync
+        document.getElementById('auth-screen')?.classList.add('gone');
+        startDBSync();
+        updateUserBadge(user.email);
+      } else {
+        // Not logged in — show auth screen, hide loading
+        hideLoading();
+        document.getElementById('auth-screen')?.classList.remove('gone');
+      }
     });
 
-    // Real-time listener — fires on ANY change from EITHER device
-    db.ref('/').on('value', snap => {
-      if (skipNext) { skipNext = false; return; }
-      const d = snap.val() || {};
-      if (d.prints)      S.prints      = Object.values(d.prints).sort((a,b)=>b.id-a.id);
-      if (d.maintenance) S.maintenance = Object.values(d.maintenance).sort((a,b)=>b.id-a.id);
-      if (d.settings)    S.settings    = {...DEF_SET, ...d.settings, materials: d.settings?.materials || DEF_MATERIALS};
-      if (d.stockSales)  S.stockSales  = Object.values(d.stockSales).sort((a,b)=>b.id-a.id);
-      cacheLocal();
-      hideLoading();
-      render();
-    }, err => {
-      console.error('FB read:', err);
-      hideLoading();
-      render();
+  } catch(e) { console.error('FB init:', e); hideLoading(); }
+}
+
+function startDBSync() {
+  db.ref('.info/connected').on('value', s => {
+    fbLive = s.val() === true; fbOK = true; updateDot();
+  });
+  db.ref('/').on('value', snap => {
+    if (skipNext) { skipNext = false; return; }
+    const d = snap.val() || {};
+    if (d.prints)      S.prints      = Object.values(d.prints).sort((a,b)=>b.id-a.id);
+    if (d.maintenance) S.maintenance = Object.values(d.maintenance).sort((a,b)=>b.id-a.id);
+    if (d.settings)    S.settings    = {...DEF_SET, ...d.settings, materials: d.settings?.materials || DEF_MATERIALS};
+    if (d.stockSales)  S.stockSales  = Object.values(d.stockSales).sort((a,b)=>b.id-a.id);
+    cacheLocal(); hideLoading(); render();
+  }, err => { console.error(err); hideLoading(); render(); });
+  setTimeout(() => hideLoading(), 5000);
+}
+
+function doLogin() {
+  const email = document.getElementById('login-email')?.value?.trim();
+  const pass  = document.getElementById('login-pass')?.value;
+  const btn   = document.getElementById('login-btn');
+  const err   = document.getElementById('login-err');
+  if (!email || !pass) return;
+  btn.disabled = true; btn.textContent = 'Signing in…'; err.style.display = 'none';
+  firebase.auth().signInWithEmailAndPassword(email, pass)
+    .catch(e => {
+      err.textContent = e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found'
+        ? '❌ Wrong email or password.' : '❌ ' + e.message;
+      err.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Sign In';
     });
+}
 
-    // Timeout fallback — show app after 4s even if Firebase is slow
-    setTimeout(() => hideLoading(), 4000);
+function doLogout() {
+  firebase.auth().signOut();
+  S.prints=[]; S.maintenance=[]; S.stockSales=[];
+  render();
+}
 
-  } catch(e) {
-    console.error('FB init:', e);
-    hideLoading();
-  }
+function updateUserBadge(email) {
+  const el = document.getElementById('user-badge');
+  if (el) el.textContent = email.split('@')[0]; // show username part
 }
 
 function fbWrite(){
