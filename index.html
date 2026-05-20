@@ -210,6 +210,7 @@ td{font-size:12px;padding:9px 10px;border-bottom:1px solid rgba(30,41,59,.5);ver
 .auth-btn:hover{background:#34d399;}
 .auth-btn:disabled{background:#334155;color:#64748b;cursor:not-allowed;}
 .auth-screen.gone{display:none;}
+.gone { display: none !important; }
 </style>
 </head>
 <body>
@@ -310,13 +311,23 @@ function doLogin() {
   const btn   = document.getElementById('login-btn');
   const err   = document.getElementById('login-err');
   if (!email || !pass) return;
-  btn.disabled = true; btn.textContent = 'Signing in…'; err.style.display = 'none';
+
+  btn.disabled = true; 
+  btn.textContent = 'Signing in…'; 
+  err.style.display = 'none';
+
   firebase.auth().signInWithEmailAndPassword(email, pass)
+    .then(() => {
+      // Clean up the login button state just in case the modal transitions slowly
+      btn.disabled = false;
+      btn.textContent = 'Sign In';
+    })
     .catch(e => {
       err.textContent = e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found'
         ? '❌ Wrong email or password.' : '❌ ' + e.message;
       err.style.display = 'block';
-      btn.disabled = false; btn.textContent = 'Sign In';
+      btn.disabled = false; 
+      btn.textContent = 'Sign In';
     });
 }
 
