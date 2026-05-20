@@ -182,6 +182,23 @@ td{font-size:12px;padding:9px 10px;border-bottom:1px solid rgba(30,41,59,.5);ver
 @keyframes spin{to{transform:rotate(360deg);}}
 .toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:200;background:#1e293b;border:1px solid #334155;border-radius:10px;padding:10px 16px;font-size:12px;color:#e2e8f0;display:flex;align-items:center;gap:8px;transition:opacity .3s;box-shadow:0 8px 24px rgba(0,0,0,.4);white-space:nowrap;}
 .toast.gone{opacity:0;pointer-events:none;}
+/* Sale modal */
+.sale-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;}
+@media(max-width:520px){.sale-form-grid{grid-template-columns:1fr;}}
+/* Sales tab */
+.sales-kpi{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px;}
+@media(min-width:768px){.sales-kpi{grid-template-columns:repeat(4,1fr);}}
+/* Shipping intelligence */
+.ship-card{background:#0f172a;border:1px solid rgba(51,65,85,.6);border-radius:12px;margin-bottom:12px;overflow:hidden;}
+.ship-card-hdr{padding:12px 16px;border-bottom:1px solid #1e293b;display:flex;align-items:center;justify-content:space-between;background:rgba(167,139,250,.04);}
+.ship-suggest{background:rgba(16,185,129,.06);border:1px solid rgba(16,185,129,.2);border-radius:8px;padding:8px 12px;font-size:11px;color:#6ee7b7;display:flex;justify-content:space-between;margin:8px 16px 12px;}
+/* Sale record row expandable */
+.sale-row-exp{background:rgba(15,23,42,.4);font-size:11px;}
+/* Combined sales source pill */
+.src-pill-order{background:rgba(96,165,250,.1);color:#60a5fa;border:1px solid rgba(96,165,250,.3);font-size:10px;padding:1px 7px;border-radius:99px;}
+.src-pill-stock{background:rgba(167,139,250,.1);color:#a78bfa;border:1px solid rgba(167,139,250,.3);font-size:10px;padding:1px 7px;border-radius:99px;}
+/* Implied shipping colour */
+.ship-pos{color:#34d399;}.ship-neg{color:#fbbf24;}.ship-zero{color:#64748b;}
 </style>
 </head>
 <body>
@@ -230,24 +247,23 @@ function fbInit() {
       const d = snap.val() || {};
       if (d.prints)      S.prints      = Object.values(d.prints).sort((a,b)=>b.id-a.id);
       if (d.maintenance) S.maintenance = Object.values(d.maintenance).sort((a,b)=>b.id-a.id);
-      if (d.settings)    S.settings    = {...DEF_SET, ...d.settings};
-      if (d.stockSales)  S.stockSales   = Object.values(d.stockSales).sort((a,b)=>b.id-a.id);
-  else               S.stockSales   = []; // Reset to empty if no data exists online
+      if (d.settings)    S.settings    = {...DEF_SET, ...d.settings, materials: d.settings?.materials || DEF_MATERIALS};
+      if (d.stockSales)  S.stockSales  = Object.values(d.stockSales).sort((a,b)=>b.id-a.id);
       cacheLocal();
-      hideLoading('firebase');
+      hideLoading();
       render();
     }, err => {
       console.error('FB read:', err);
-      hideLoading('error');
+      hideLoading();
       render();
     });
 
     // Timeout fallback — show app after 4s even if Firebase is slow
-    setTimeout(() => hideLoading('timeout'), 4000);
+    setTimeout(() => hideLoading(), 4000);
 
   } catch(e) {
     console.error('FB init:', e);
-    hideLoading('error');
+    hideLoading();
   }
 }
 
@@ -263,11 +279,11 @@ function fbWrite(){
     maintenance:Object.keys(mo).length?mo:null,
     settings:   S.settings,
     stockSales: Object.keys(so).length?so:null,
-  }).catch(e=>{skipNext=false;toast('⚠ Firebase write failed','err');console.error(e);});
+  }).catch(e=>{skipNext=false;toast('⚠ Firebase write failed — check DB rules','err');console.error(e);});
 }
 function updateDot(){document.querySelectorAll('.sdot').forEach(d=>{d.className='dot sdot '+(fbLive?'live':fbOK?'warn':'err');});}
-function hideLoading(){if(loadDone)return;loadDone=true;const el=document.getElementById('loading');if(el)el.classList.add('gone');if(!fbOK)render();}
-function toast(msg,type='ok'){const el=document.getElementById('toast');if(!el)return;const c=type==='err'?'#f87171':type==='warn'?'#fbbf24':'#34d399';el.innerHTML=`<span style="color:${c};">●</span> ${msg}`;el.classList.remove('gone');clearTimeout(window._tt);window._tt=setTimeout(()=>el.classList.add('gone'),3000);}
+function hideLoading(){if(loadDone)return;loadDone=true;const el=document.getElementById('loading');if(el)el.classList.add('gone');render();}
+function toast(msg,type='ok'){const el=document.getElementById('toast');if(!el)return;const c=type==='err'?'#f87171':type==='warn'?'#fbbf24':'#34d399';el.innerHTML=`<span style="color:${c};">●</span> ${msg}`;el.classList.remove('gone');clearTimeout(window._tt);window._tt=setTimeout(()=>el.classList.add('gone'),3500);}
 
 // ─── ICONS ────────────────────────────────────────────────────
 const IC={
@@ -333,6 +349,12 @@ const BLANK={
   serialNumber:null,lotNumber:null,
 };
 const BLANK_M={date:today(),printerName:'Bambu Lab A1',type:'',notes:'',partCost:'0'};
+const BLANK_SALE={
+  partName:'',partVersion:'v1.0',date:today(),
+  quantity:'1',pricePerUnit:'',finalAmount:'',
+  actualShippingCost:'0',packagingCost:'0',
+  customerName:'',customerContact:'',notes:'',
+};
 
 // ─── STATE ────────────────────────────────────────────────────
 let S={
@@ -341,7 +363,8 @@ let S={
   showModal:false,editId:null,modalTab:'job',form:{...BLANK},
   logSearch:'',logFilter:'all',logExpanded:null,
   showMF:false,mf:{...BLANK_M},
-  invSearch:'',showSaleModal:false,saleForm:{},
+  invSearch:'',showSaleModal:false,editSaleId:null,saleForm:{...BLANK_SALE},
+  salesSearch:'',salesFilter:'all',salesExpanded:null,
 };
 
 // ─── PERSISTENCE ──────────────────────────────────────────────
@@ -580,15 +603,46 @@ function addMaterial(){
 }
 function removeMaterial(id){S.settings.materials=S.settings.materials.filter(m=>m.id!==id);persist();render();}
 
-// Stock sale recording
-function recordSale(partName,partVer){
-  const qty=prompt(`How many units sold from "${partName} ${partVer}"?`,'1');
-  if(!qty)return;
-  const price=prompt(`Sale price per unit (${cu()})?`,'');
-  const cust=prompt('Customer name?','');
-  S.stockSales=[...S.stockSales,{id:Date.now(),date:today(),partName,partVersion:partVer,quantity:+qty||1,salePrice:+price||0,customerName:cust||'',notes:''}];
-  persist();render();toast(`✓ Sale recorded — ${qty} units`);
+// Stock sale modal actions
+function openSaleModal(id=null, prefillName='', prefillVer=''){
+  S.showSaleModal=true;
+  if(id){
+    const s=S.stockSales.find(x=>x.id===id);
+    S.saleForm=s?{...BLANK_SALE,...s}:{...BLANK_SALE};
+    S.editSaleId=id;
+  } else {
+    S.saleForm={...BLANK_SALE, partName:prefillName, partVersion:prefillVer, date:today()};
+    S.editSaleId=null;
+  }
+  render();
 }
+function closeSaleModal(){S.showSaleModal=false;S.editSaleId=null;render();}
+function saveSale(){
+  const f=S.saleForm;
+  // Read from DOM inputs
+  ['partName','partVersion','date','quantity','pricePerUnit','finalAmount',
+   'actualShippingCost','packagingCost','customerName','customerContact','notes']
+    .forEach(k=>{const el=document.getElementById('sf-'+k);if(el)f[k]=el.value;});
+  const sale={...f, id:S.editSaleId||Date.now()};
+  S.stockSales=S.editSaleId
+    ? S.stockSales.map(s=>s.id===S.editSaleId?sale:s)
+    : [...S.stockSales, sale];
+  S.showSaleModal=false; S.editSaleId=null;
+  persist(); render();
+  toast(S.editSaleId?'✓ Sale record updated':'✓ Sale recorded');
+}
+function delSale(id){
+  if(!confirm('Delete this sale record?'))return;
+  S.stockSales=S.stockSales.filter(s=>s.id!==id);
+  persist(); render(); toast('Sale record deleted','warn');
+}
+// Legacy: keep for backward compat but open modal instead
+function recordSale(partName,partVer){openSaleModal(null,partName,partVer);}
+
+// Sales tab helpers
+function setSalesFilter(f){S.salesFilter=f;render();}
+function setSalesSearch(v){S.salesSearch=v;render();}
+function toggleSalesExpand(id){S.salesExpanded=S.salesExpanded===id?null:id;render();}
 
 function addPrinter(){const el=document.getElementById('new-printer');const v=el?.value?.trim();if(!v||S.settings.printers.includes(v))return;S.settings.printers=[...S.settings.printers,v];persist();render();}
 function removePrinter(n){S.settings.printers=S.settings.printers.filter(p=>p!==n);persist();render();}
@@ -873,8 +927,31 @@ function renderInventory(){
   ${recentSales.length>0?`<div class="card">
     <div class="sec-hdr"><p class="sec-ttl">Stock Sale History</p></div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>Date</th><th>Part</th><th>Lot</th><th>Customer</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
-      <tbody>${recentSales.map(s=>`<tr><td style="color:#64748b;">${s.date}</td><td style="color:#e2e8f0;">${esc(s.partName)} <span style="color:#64748b;">${esc(s.partVersion)}</span></td><td>—</td><td style="color:#94a3b8;">${esc(s.customerName)||'—'}</td><td style="color:#60a5fa;">${s.quantity}</td><td style="color:#94a3b8;">${s.salePrice?`${cv}${s.salePrice}`:'—'}</td><td style="color:#34d399;font-weight:700;">${s.salePrice?`${cv}${(s.salePrice*s.quantity).toFixed(0)}`:'—'}</td></tr>`).join('')}</tbody>
+      <thead><tr><th>Date</th><th>Part</th><th>Customer</th><th>Contact</th><th>Qty</th><th>Unit Price</th><th>Final Paid</th><th>Implied Ship</th><th>Carrier Cost</th><th>Ship P&L</th><th></th></tr></thead>
+      <tbody>${recentSales.map(s=>{
+        const unitP=+s.pricePerUnit||+s.salePrice||0;
+        const subtotal=unitP*(+s.quantity||1);
+        const final=+s.finalAmount||subtotal;
+        const implied=final-subtotal;
+        const carrier=+s.actualShippingCost||0;
+        const shipPnl=implied-carrier;
+        const sc=implied>0?'ship-pos':implied<0?'ship-neg':'ship-zero';
+        return`<tr>
+          <td style="color:#64748b;white-space:nowrap;">${s.date}</td>
+          <td style="color:#e2e8f0;">${esc(s.partName)} <span style="color:#64748b;font-size:10px;">${esc(s.partVersion||'')}</span></td>
+          <td style="color:#94a3b8;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.customerName)||'—'}</td>
+          <td style="color:#60a5fa;font-size:10px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.customerContact)||'—'}</td>
+          <td style="color:#60a5fa;text-align:right;">${s.quantity}</td>
+          <td style="color:#94a3b8;">${unitP?`${cv}${unitP}`:'—'}</td>
+          <td style="color:#e2e8f0;font-weight:700;">${cv}${final.toFixed(0)}</td>
+          <td class="${sc}">${implied>0?'+':''}${cv}${implied.toFixed(0)}</td>
+          <td style="color:#94a3b8;">${carrier>0?`${cv}${carrier.toFixed(0)}`:'—'}</td>
+          <td style="color:${shipPnl>=0?'#34d399':'#f87171'};font-weight:700;">${shipPnl>=0?'+':''}${cv}${shipPnl.toFixed(0)}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn-ico edit" onclick="openSaleModal(${s.id})" title="Edit">${ic('edit',13)}</button>
+            <button class="btn-ico del" onclick="delSale(${s.id})" title="Delete">${ic('trash',13)}</button>
+          </td>
+        </tr>`;}).join('')}</tbody>
     </table></div>
   </div>`:''}`; 
 }
@@ -984,7 +1061,288 @@ function renderSettings(){
   </div>`;
 }
 
-// ─── RENDER: MODAL ────────────────────────────────────────────
+// ─── RENDER: SALE MODAL ───────────────────────────────────────
+function renderSaleModal(){
+  if(!S.showSaleModal)return'';
+  const f=S.saleForm, cv=cu(), isEdit=!!S.editSaleId;
+  const unitP=+f.pricePerUnit||0, qty=+f.quantity||1, final=+f.finalAmount||0;
+  const subtotal=unitP*qty;
+  const implied=final>0?final-subtotal:0;
+  const carrier=+f.actualShippingCost||0;
+  const shipPnl=implied-carrier;
+  const sf=(id,label,type='text',val='',ph='')=>lbl(label,`<input id="sf-${id}" class="inp" type="${type}" value="${esc(val)}" placeholder="${esc(ph)}" oninput="S.saleForm['${id}']=this.value;rerenderSaleCalc()">`);
+
+  return`<div class="modal-bg" onclick="if(event.target===this)closeSaleModal()">
+    <div class="modal-box" style="max-width:640px;" onclick="event.stopPropagation()">
+      <div class="modal-hdr">
+        <div class="modal-title"><span class="pulse ${isEdit?'edit-pulse':''}"></span>${isEdit?'Edit Sale Record':'Record New Sale'}</div>
+        <button class="btn-ico" onclick="closeSaleModal()" style="color:#64748b;">${ic('x',15)}</button>
+      </div>
+      <div style="overflow-y:auto;flex:1;padding:16px;" class="modal-scroll">
+        ${isEdit?`<div class="edit-banner">${ic('edit',12)} Editing sale record from ${f.date}</div>`:''}
+
+        <div class="div-label">Product Info</div>
+        <div class="sale-form-grid">
+          ${sf('partName','Part / Project Name','text',f.partName,'e.g. Vase Design')}
+          ${sf('partVersion','Version','text',f.partVersion,'v1.0')}
+        </div>
+        <div class="sale-form-grid">
+          ${sf('date','Sale Date','date',f.date)}
+          ${sf('quantity','Quantity Sold','number',f.quantity)}
+        </div>
+
+        <div class="div-label">Customer Info</div>
+        <div class="sale-form-grid">
+          ${sf('customerName','Customer Name','text',f.customerName,'Name or order ref')}
+          ${sf('customerContact','Contact (Phone / Line / IG / FB)','text',f.customerContact,'e.g. 08x-xxx-xxxx or @handle')}
+        </div>
+
+        <div class="div-label">Pricing — Real Final Numbers</div>
+        <div class="sale-form-grid">
+          ${sf('pricePerUnit',`Unit Price (${cv}) agreed`,  'number',f.pricePerUnit,`e.g. 79`)}
+          ${sf('finalAmount', `Final Amount Customer Paid (${cv}) ← total cash received`, 'number',f.finalAmount,`e.g. 189 for 2 units`)}
+        </div>
+
+        <!-- Live implied shipping calculation -->
+        <div id="sale-calc" style="margin-bottom:12px;">${renderSaleCalcPreview(f,cv)}</div>
+
+        <div class="div-label">Your Costs for This Shipment</div>
+        <div class="sale-form-grid">
+          ${sf('actualShippingCost',`Carrier Shipping Cost (${cv}) — you paid`,'number',f.actualShippingCost,'e.g. 28')}
+          ${sf('packagingCost',`Packaging Cost (${cv})`, 'number',f.packagingCost,'e.g. 20')}
+        </div>
+        ${lbl('Notes',`<textarea id="sf-notes" class="inp" rows="2" placeholder="Special requests, discount reason, platform…" oninput="S.saleForm.notes=this.value">${esc(f.notes)}</textarea>`)}
+      </div>
+      <div class="modal-ftr">
+        <button class="m-cancel" onclick="closeSaleModal()">Cancel</button>
+        <button class="${isEdit?'m-save edit-save':'m-save'}" onclick="saveSale()">${ic('save',13)} ${isEdit?'Update Record':'Save Sale'}</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderSaleCalcPreview(f,cv){
+  const unitP=+f.pricePerUnit||0, qty=+f.quantity||1, final=+f.finalAmount||0;
+  const subtotal=parseFloat((unitP*qty).toFixed(2));
+  const implied=final>0?parseFloat((final-subtotal).toFixed(2)):null;
+  const carrier=+f.actualShippingCost||0;
+  const pkg=+f.packagingCost||0;
+  const shipPnl=implied!==null?parseFloat((implied-carrier).toFixed(2)):null;
+  if(!unitP&&!final) return '';
+  return`<div style="background:#1e293b;border-radius:10px;padding:12px;font-size:12px;">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;text-align:center;margin-bottom:8px;">
+      <div><p style="color:#64748b;font-size:10px;margin-bottom:2px;">Product Subtotal</p><p style="color:#60a5fa;font-weight:700;">${cv}${subtotal.toFixed(0)}</p><p style="font-size:10px;color:#475569;">${qty} × ${cv}${unitP}</p></div>
+      <div><p style="color:#64748b;font-size:10px;margin-bottom:2px;">Final Paid</p><p style="color:#e2e8f0;font-weight:700;">${final>0?cv+final.toFixed(0):'?'}</p></div>
+      <div><p style="color:#64748b;font-size:10px;margin-bottom:2px;">Implied Shipping</p>
+        ${implied!==null?`<p style="color:${implied>0?'#34d399':implied<0?'#fbbf24':'#64748b'};font-weight:700;">${implied>0?'+':''}${cv}${implied.toFixed(0)}</p><p style="font-size:10px;color:#475569;">${implied<0?'Discount given':implied===0?'No shipping':'Customer paid shipping'}</p>`:'<p style="color:#475569;">Enter final amount</p>'}
+      </div>
+    </div>
+    ${implied!==null&&carrier>0?`<div style="border-top:1px solid #334155;padding-top:8px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="color:#64748b;">Shipping P&amp;L: collected ${cv}${implied.toFixed(0)} − carrier ${cv}${carrier.toFixed(0)}</span>
+      <span style="font-weight:700;color:${shipPnl>=0?'#34d399':'#f87171'};">${shipPnl>=0?'+':''}${cv}${shipPnl.toFixed(0)}</span>
+    </div>`:''}
+  </div>`;
+}
+
+function rerenderSaleCalc(){
+  const el=document.getElementById('sale-calc');
+  if(!el)return;
+  // sync from DOM
+  ['quantity','pricePerUnit','finalAmount','actualShippingCost','packagingCost']
+    .forEach(k=>{const d=document.getElementById('sf-'+k);if(d)S.saleForm[k]=d.value;});
+  el.innerHTML=renderSaleCalcPreview(S.saleForm,cu());
+}
+
+// ─── RENDER: SALES TAB ────────────────────────────────────────
+function renderSales(){
+  const {prints,stockSales,settings}=S, cv=cu();
+
+  // Normalise ALL sales into one array
+  const allSales=[];
+
+  // From stock sales
+  stockSales.forEach(s=>{
+    const unitP=+s.pricePerUnit||+s.salePrice||0;
+    const qty=+s.quantity||1;
+    const subtotal=unitP*qty;
+    const final=+s.finalAmount||subtotal;
+    const impliedShip=final-subtotal;
+    const carrier=+s.actualShippingCost||0;
+    const pkg=+s.packagingCost||0;
+    allSales.push({id:s.id,type:'stock',date:s.date,product:s.partName,version:s.partVersion,
+      customer:s.customerName,contact:s.customerContact,qty,unitP,subtotal,final,
+      impliedShip,carrier,pkg,revenue:final,cost:carrier+pkg,profit:final-carrier-pkg,
+      notes:s.notes});
+  });
+
+  // From print orders with actual sale price
+  prints.filter(p=>p.actualSalePrice&&p.orderType!=='stock').forEach(p=>{
+    const c=calc(p,settings);
+    allSales.push({id:p.id,type:'order',date:p.date,product:p.projectName,version:p.fileVersion,
+      customer:p.customerName,contact:'',qty:+p.quantity||1,
+      unitP:+p.actualSalePrice||0,subtotal:+p.actualSalePrice||0,
+      final:c.revenue,impliedShip:+p.shippingCharge||0,
+      carrier:+p.shippingFee||0,pkg:+p.packagingCost||0,
+      revenue:c.revenue,cost:c.totalCost,profit:c.profit,margin:c.margin,
+      serial:p.serialNumber,notes:p.notes});
+  });
+
+  allSales.sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  // Apply filter and search
+  const {salesFilter,salesSearch}=S;
+  const filtered=allSales
+    .filter(s=>salesFilter==='all'||s.type===salesFilter)
+    .filter(s=>!salesSearch||[s.product,s.version,s.customer,s.contact,s.notes].join(' ').toLowerCase().includes(salesSearch.toLowerCase()));
+
+  // KPIs
+  const totalRevenue=allSales.reduce((a,s)=>a+s.revenue,0);
+  const totalCost=allSales.reduce((a,s)=>a+s.cost,0);
+  const totalProfit=allSales.reduce((a,s)=>a+s.profit,0);
+  const avgMargin=totalRevenue>0?(totalProfit/totalRevenue*100):0;
+
+  // ── SHIPPING INTELLIGENCE ────────────────────────────────────
+  // Group by (product × version × qty)
+  const shipMap={};
+  allSales.forEach(s=>{
+    if(s.impliedShip===0&&s.carrier===0)return; // skip if no shipping data
+    const key=`${s.product}|||${s.version}|||${s.qty}`;
+    if(!shipMap[key])shipMap[key]={product:s.product,version:s.version,qty:s.qty,rows:[]};
+    shipMap[key].rows.push(s);
+  });
+  const shipGroups=Object.values(shipMap)
+    .filter(g=>g.rows.length>0)
+    .sort((a,b)=>a.product.localeCompare(b.product)||a.qty-b.qty);
+
+  return`
+    <!-- KPI row -->
+    <div class="sales-kpi">
+      ${[
+        {l:'Total Revenue',v:`${cv}${totalRevenue.toFixed(0)}`,c:'#60a5fa'},
+        {l:'Total Profit',v:`${cv}${totalProfit.toFixed(0)}`,c:totalProfit>=0?'#34d399':'#f87171'},
+        {l:'Sales Count',v:allSales.length,c:'#94a3b8'},
+        {l:'Avg Margin',v:`${avgMargin.toFixed(1)}%`,c:avgMargin>=0?'#34d399':'#f87171'},
+      ].map(k=>`<div class="kpi"><div><p class="kpi-lbl">${k.l}</p><p class="kpi-val" style="color:${k.c};">${k.v}</p></div></div>`).join('')}
+    </div>
+
+    <!-- All Sales Table -->
+    <div class="card" style="margin-bottom:20px;">
+      <div class="sec-hdr" style="flex-wrap:wrap;gap:8px;">
+        <p class="sec-ttl">All Sales</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+          ${['all','order','stock'].map(f=>`<button class="fltr-btn ${salesFilter===f?'on':''}" onclick="setSalesFilter('${f}')">${f==='all'?'All':f==='order'?'Customer Orders':'Stock Sales'}</button>`).join('')}
+          <button class="btn btn-em btn-sm" onclick="openSaleModal()">${ic('plus',11)} Add Stock Sale</button>
+        </div>
+      </div>
+      <div style="padding:8px 16px 0;"><input class="inp" placeholder="Search product, customer, contact…" oninput="setSalesSearch(this.value)" value="${esc(salesSearch)}" style="margin-bottom:8px;"></div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Date</th><th>Type</th><th>Product</th><th>Customer</th><th>Contact</th><th>Qty</th><th>Final Paid</th><th>Cost</th><th>Profit</th><th>Margin</th><th>Ship Recv</th><th></th></tr></thead>
+        <tbody>${!filtered.length
+          ?`<tr><td colspan="12" style="text-align:center;color:#334155;padding:32px;">No sales records yet.</td></tr>`
+          :filtered.map(s=>{
+            const margin=s.revenue>0?((s.profit/s.revenue)*100).toFixed(1):0;
+            return`<tr class="tr-c ${S.salesExpanded===s.id?'exp':''}" onclick="toggleSalesExpand(${JSON.stringify(s.id)})">
+              <td style="color:#64748b;white-space:nowrap;">${s.date}</td>
+              <td><span class="src-pill-${s.type}">${s.type==='order'?'Order':'Stock'}</span></td>
+              <td style="color:#e2e8f0;font-weight:500;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.product)} <span style="color:#64748b;font-size:10px;">${esc(s.version)}</span></td>
+              <td style="color:#94a3b8;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.customer)||'—'}</td>
+              <td style="color:#60a5fa;font-size:11px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(s.contact)||'—'}</td>
+              <td style="color:#60a5fa;text-align:right;">${s.qty}</td>
+              <td style="color:#e2e8f0;font-weight:700;">${cv}${s.final.toFixed(0)}</td>
+              <td style="color:#f87171;">${cv}${s.cost.toFixed(0)}</td>
+              <td style="color:${s.profit>=0?'#34d399':'#f87171'};font-weight:700;">${s.profit>=0?'+':''}${cv}${s.profit.toFixed(0)}</td>
+              <td style="color:${+margin>=0?'#34d399':'#f87171'};">${s.revenue>0?margin+'%':'—'}</td>
+              <td style="color:${s.impliedShip>0?'#34d399':s.impliedShip<0?'#fbbf24':'#334155'};">${s.impliedShip!==0?`${s.impliedShip>0?'+':''}${cv}${s.impliedShip.toFixed(0)}`:'—'}</td>
+              <td style="white-space:nowrap;">
+                ${s.type==='stock'?`<button class="btn-ico edit" onclick="event.stopPropagation();openSaleModal(${s.id})" title="Edit">${ic('edit',13)}</button><button class="btn-ico del" onclick="event.stopPropagation();delSale(${s.id})" title="Delete">${ic('trash',13)}</button>`
+                :`<button class="btn-ico edit" onclick="event.stopPropagation();openModal(${s.id})" title="Edit print record">${ic('edit',13)}</button>`}
+              </td>
+            </tr>
+            ${S.salesExpanded===s.id?`<tr class="sale-row-exp"><td colspan="12"><div style="padding:12px 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;font-size:11px;">
+              <div><p style="color:#475569;margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;font-size:10px;">Sale Breakdown</p>
+                <p style="color:#94a3b8;margin-bottom:3px;">Unit Price: <span style="color:#cbd5e1;">${s.unitP?`${cv}${s.unitP}`:'—'}</span></p>
+                <p style="color:#94a3b8;margin-bottom:3px;">Subtotal: <span style="color:#60a5fa;">${cv}${s.subtotal.toFixed(0)}</span></p>
+                <p style="color:#94a3b8;margin-bottom:3px;">Final Paid: <span style="color:#e2e8f0;font-weight:700;">${cv}${s.final.toFixed(0)}</span></p>
+                ${s.impliedShip!==0?`<p style="color:#94a3b8;margin-bottom:3px;">Implied Ship: <span style="color:${s.impliedShip>0?'#34d399':'#fbbf24'};">${s.impliedShip>0?'+':''}${cv}${s.impliedShip.toFixed(0)}</span></p>`:''}
+              </div>
+              <div><p style="color:#475569;margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;font-size:10px;">Costs</p>
+                <p style="color:#94a3b8;margin-bottom:3px;">Carrier: <span style="color:#cbd5e1;">${s.carrier>0?`${cv}${s.carrier.toFixed(0)}`:'—'}</span></p>
+                <p style="color:#94a3b8;margin-bottom:3px;">Packaging: <span style="color:#cbd5e1;">${s.pkg>0?`${cv}${s.pkg.toFixed(0)}`:'—'}</span></p>
+                <p style="color:#94a3b8;margin-bottom:3px;">Total Cost: <span style="color:#f87171;">${cv}${s.cost.toFixed(0)}</span></p>
+                ${s.carrier>0&&s.impliedShip!==0?`<p style="color:#94a3b8;">Ship P&L: <span style="color:${(s.impliedShip-s.carrier)>=0?'#34d399':'#f87171'};">${(s.impliedShip-s.carrier)>=0?'+':''}${cv}${(s.impliedShip-s.carrier).toFixed(0)}</span></p>`:''}
+              </div>
+              <div><p style="color:#475569;margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;font-size:10px;">Notes</p>
+                <p style="color:#64748b;font-style:italic;">${esc(s.notes)||'No notes'}</p>
+              </div>
+            </div></td></tr>` : ''}`;
+          }).join('')}
+        </tbody>
+      </table></div>
+    </div>
+
+    <!-- Shipping Intelligence -->
+    ${shipGroups.length===0?'':`<div class="card" style="padding:0;overflow:hidden;">
+      <div style="padding:12px 16px;border-bottom:1px solid #1e293b;display:flex;align-items:center;gap:8px;">
+        ${ic('trending',14)}
+        <p class="sec-ttl" style="color:#a78bfa;">Shipping Intelligence — Average by Product × Quantity</p>
+      </div>
+      <div style="padding:12px 16px 0;font-size:11px;color:#64748b;margin-bottom:4px;">
+        Based on real sale data. <b style="color:#a78bfa;">Implied shipping</b> = final paid − product subtotal. Use these averages when quoting future orders.
+      </div>
+      ${(()=>{
+        // Group by product+version first for headers
+        const byProduct={};
+        shipGroups.forEach(g=>{
+          const pk=`${g.product}|||${g.version}`;
+          if(!byProduct[pk])byProduct[pk]={product:g.product,version:g.version,groups:[]};
+          byProduct[pk].groups.push(g);
+        });
+        return Object.values(byProduct).map(p=>{
+          const rows=p.groups.map(g=>{
+            const n=g.rows.length;
+            const avgImplied=g.rows.reduce((a,r)=>a+r.impliedShip,0)/n;
+            const avgCarrier=g.rows.reduce((a,r)=>a+r.carrier,0)/n;
+            const avgFinal=g.rows.reduce((a,r)=>a+r.final,0)/n;
+            const avgUnitP=g.rows.reduce((a,r)=>a+r.unitP,0)/n;
+            const avgSubtotal=avgUnitP*g.qty;
+            const avgShipPnl=avgImplied-avgCarrier;
+            const sc=avgImplied>0?'#34d399':avgImplied<0?'#fbbf24':'#64748b';
+            return{qty:g.qty,n,avgUnitP,avgSubtotal,avgFinal,avgImplied,avgCarrier,avgShipPnl,sc};
+          });
+          const bestImplied=rows.length>0?Math.max(...rows.map(r=>r.avgImplied)):0;
+          return`<div class="ship-card">
+            <div class="ship-card-hdr">
+              <div>
+                <span style="font-size:13px;font-weight:700;color:#e2e8f0;">${esc(p.product)}</span>
+                <span style="color:#64748b;margin-left:8px;font-size:11px;">${esc(p.version)}</span>
+              </div>
+              <span class="lot-tag">${rows.reduce((a,r)=>a+r.n,0)} transactions</span>
+            </div>
+            <div class="tbl-wrap"><table>
+              <thead><tr>
+                <th>Qty</th><th>Avg Unit Price</th><th>Avg Subtotal</th><th>Avg Final Paid</th>
+                <th>Avg Implied Ship</th><th>Avg Carrier Cost</th><th>Avg Ship P&L</th><th>Count</th>
+              </tr></thead>
+              <tbody>${rows.map(r=>`<tr>
+                <td style="color:#60a5fa;font-weight:700;">×${r.qty}</td>
+                <td style="color:#94a3b8;">${cv}${r.avgUnitP.toFixed(0)}</td>
+                <td style="color:#64748b;">${cv}${r.avgSubtotal.toFixed(0)}</td>
+                <td style="color:#e2e8f0;font-weight:700;">${cv}${r.avgFinal.toFixed(0)}</td>
+                <td style="color:${r.sc};font-weight:700;">${r.avgImplied>0?'+':''}${cv}${r.avgImplied.toFixed(0)}</td>
+                <td style="color:#94a3b8;">${r.avgCarrier>0?`${cv}${r.avgCarrier.toFixed(0)}`:'—'}</td>
+                <td style="color:${r.avgShipPnl>=0?'#34d399':'#f87171'};font-weight:700;">${r.avgShipPnl>=0?'+':''}${cv}${r.avgShipPnl.toFixed(0)}</td>
+                <td style="color:#475569;">${r.n} sale${r.n!==1?'s':''}</td>
+              </tr>`).join('')}</tbody>
+            </table></div>
+            ${bestImplied>0?`<div class="ship-suggest">
+              <span>💡 Suggested shipping to quote for this product: <b style="color:#10b981;">${cv}${Math.ceil(bestImplied/5)*5}</b> (rounded up from avg ${cv}${bestImplied.toFixed(0)})</span>
+            </div>`:''}
+          </div>`;
+        }).join('');
+      })()}
+    </div>`}
+  `;
+}
 function renderModal(){
   if(!S.showModal)return'';
   const isEdit=!!S.editId;
@@ -1007,11 +1365,12 @@ function renderModal(){
 
 // ─── RENDER: FULL APP ─────────────────────────────────────────
 const TABS=[
-  {k:'dashboard',l:'Dashboard',ico:'grid'},
-  {k:'log',      l:'Log',      ico:'log'},
-  {k:'inventory',l:'Stock',    ico:'box'},
-  {k:'maintenance',l:'Service',ico:'wrench'},
-  {k:'settings', l:'Settings', ico:'cog'},
+  {k:'dashboard',  l:'Dashboard', ico:'grid'},
+  {k:'log',        l:'Log',       ico:'log'},
+  {k:'inventory',  l:'Stock',     ico:'box'},
+  {k:'sales',      l:'Sales',     ico:'trending'},
+  {k:'maintenance',l:'Service',   ico:'wrench'},
+  {k:'settings',   l:'Settings',  ico:'cog'},
 ];
 
 function render(){
@@ -1034,11 +1393,13 @@ function render(){
       ${t==='dashboard'   ?renderDashboard()   :''}
       ${t==='log'         ?renderLog()         :''}
       ${t==='inventory'   ?renderInventory()   :''}
+      ${t==='sales'       ?renderSales()       :''}
       ${t==='maintenance' ?renderMaintenance() :''}
       ${t==='settings'    ?renderSettings()    :''}
     </main>
-    <nav class="mob-nav">${TABS.map(x=>`<button class="mob-btn ${t===x.k?'on':''}" onclick="setTab('${x.k}')">${ic(x.ico,19)}<span>${x.l}</span></button>`).join('')}</nav>
-    ${renderModal()}`;
+    <nav class="mob-nav">${TABS.map(x=>`<button class="mob-btn ${t===x.k?'on':''}" onclick="setTab('${x.k}')">${ic(x.ico,18)}<span>${x.l}</span></button>`).join('')}</nav>
+    ${renderModal()}
+    ${renderSaleModal()}`;
   if(S.showModal)refreshPrev();
 }
 
