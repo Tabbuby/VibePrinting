@@ -231,6 +231,8 @@ function fbInit() {
       if (d.prints)      S.prints      = Object.values(d.prints).sort((a,b)=>b.id-a.id);
       if (d.maintenance) S.maintenance = Object.values(d.maintenance).sort((a,b)=>b.id-a.id);
       if (d.settings)    S.settings    = {...DEF_SET, ...d.settings};
+      if (d.stockSales)  S.stockSales   = Object.values(d.stockSales).sort((a,b)=>b.id-a.id);
+  else               S.stockSales   = []; // Reset to empty if no data exists online
       cacheLocal();
       hideLoading('firebase');
       render();
