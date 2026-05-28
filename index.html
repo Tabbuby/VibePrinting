@@ -1126,8 +1126,6 @@ function renderSettings(){
         </button>
       `:` 
         <div class="g2 mb">
-          ${lbl('Bambu Account Email',`<input id="bambu-email" class="inp" type="email" placeholder="you@bambulab.com" value="${esc(settings.bambuEmail||'')}" onkeydown="if(event.key==='Enter')document.getElementById('bambu-pass').focus()">`)}
-          ${lbl('Password',`<input id="bambu-pass" class="inp" type="password" placeholder="••••••••" onkeydown="if(event.key==='Enter')bambuLogin()">`)}
         </div>
         <button id="bambu-login-btn" class="btn btn-em" style="width:100%;justify-content:center;padding:10px;border-radius:9px;" onclick="bambuLogin()">
           ${ic('wifi',12)} Connect to Bambu Cloud
@@ -1476,42 +1474,22 @@ function renderSales(){
 }
 // ─── BAMBU CLOUD INTEGRATION ─────────────────────────────────
 async function bambuLogin(){
-  const email=document.getElementById('bambu-email')?.value?.trim();
-  const pass =document.getElementById('bambu-pass')?.value;
-  if(!email||!pass){toast('Enter email and password','warn');return;}
   const btn=document.getElementById('bambu-login-btn');
   if(btn){btn.disabled=true;btn.textContent='Connecting…';}
   try{
-    const res=await fetch(BAMBU_PROXY,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','X-Target':'/v1/user-service/user/login'},
-      body:JSON.stringify({account:email,password:pass,apiError:''}),
-    });
+    const res=await fetch('https://d-manager-5afba-default-rtdb.asia-southeast1.firebasedatabase.app/bambu_token.json');
     const data=await res.json();
-    console.log('Bambu login response:',JSON.stringify(data)); // debug — check browser console
-    // Accept token under any field name Bambu uses
-    const tok=data.token||data.accessToken||data.access_token;
-    if(tok){
-      S.settings.bambuToken=tok;
-      S.settings.bambuEmail=email;
-      S.bambuTfaKey=null;
+    if(data?.token){
+      S.settings.bambuToken=data.token;
       cacheLocal();
       toast('✓ Connected to Bambu Cloud');
       render();
-    } else if (data.loginType === 2 || data.loginType === 'verifyCode' || data.tfa_key || data.tfaKey) {
-                S.bambuTfaKey = data.tfa_key || data.tfaKey || 'pending';
-      S.settings.bambuEmail=email;
-      toast('📧 Check your email for a 6-digit code','warn');
-      render();
     } else {
-      // Show the exact API response so user/dev can diagnose
-      const msg=data.message||data.error||data.errorMessage||data.msg||JSON.stringify(data);
-      toast(`❌ Bambu: ${msg}`,'err');
+      toast('❌ No token yet — wait for cron to run (up to 30 min)','err');
       if(btn){btn.disabled=false;btn.textContent='Connect to Bambu Cloud';}
     }
   }catch(e){
-    toast('❌ Worker unreachable — is holy-shoot.bankkooki.workers.dev deployed?','err');
-    console.error('bambuLogin error:',e);
+    toast('❌ Could not reach Firebase','err');
     if(btn){btn.disabled=false;btn.textContent='Connect to Bambu Cloud';}
   }
 }
