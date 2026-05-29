@@ -1557,13 +1557,33 @@ async function bambuFetchTasks(after=0,limit=20){
       render();
       return null;
     }
-    const data=await res.json();
-    if(data.hits||data.total!==undefined) return data;
-    toast('Unexpected response from Bambu API','warn');
-    return null;
+    const raw=await res.json();
+    // Always log so we can diagnose API changes
+    console.log('Bambu tasks raw response:',JSON.stringify(raw));
+
+    // Bambu API has returned data in different shapes across versions:
+    // Shape A (common): { hits:[...], total:N, message:"success" }
+    // Shape B (newer):  { code:0, data:{ hits:[...], total:N } }
+    // Shape C (empty):  { message:"success", total:0 }  -- hits key missing
+    const payload = (raw.data && typeof raw.data==='object') ? raw.data : raw;
+    const hits    = Array.isArray(payload.hits) ? payload.hits : [];
+    const total   = typeof payload.total==='number' ? payload.total : hits.length;
+
+    // Detect genuine API errors vs empty-but-valid responses
+    const isOk = raw.message==='success'||raw.code===0||raw.code===null||
+                 payload.message==='success'||Array.isArray(payload.hits)||
+                 typeof payload.total==='number';
+
+    if(!isOk){
+      const msg=raw.message||raw.error||raw.msg||JSON.stringify(raw).slice(0,120);
+      console.warn('Bambu API unexpected:',msg);
+      toast(`Bambu: ${msg}`,'warn');
+      return null;
+    }
+    return {hits, total};
   }catch(e){
-    toast('Failed to fetch Bambu print history','err');
-    console.error(e);
+    toast('Failed to reach Bambu — check your Cloudflare Worker is running','err');
+    console.error('bambuFetchTasks:',e);
     return null;
   }
 }
@@ -1729,8 +1749,17 @@ function renderImportModal(){
               <p style="font-size:12px;color:#475569;">Fetching print history from Bambu Cloud…</p>
             </div>`
           :S.importPrints.length===0
-            ?`<div style="text-align:center;padding:48px;color:#334155;">
-                <p style="font-size:14px;">No prints found in your Bambu Cloud history.</p>
+            ?`<div style="text-align:center;padding:48px 24px;">
+                <div style="font-size:32px;margin-bottom:12px;">🖨️</div>
+                <p style="font-size:14px;color:#e2e8f0;margin-bottom:8px;">No prints found in Bambu Cloud yet</p>
+                <p style="font-size:12px;color:#475569;line-height:1.6;">
+                  This is expected if you haven't sent any prints to your printer yet.<br>
+                  Once you complete a print via Bambu Studio or Handy, it will appear here.<br><br>
+                  <b style="color:#64748b;">If you have printed before</b> — open your browser's
+                  <b style="color:#64748b;">DevTools → Console</b> and look for
+                  <code style="background:#1e293b;padding:1px 6px;border-radius:4px;color:#34d399;">Bambu tasks raw response</code>
+                  to see exactly what the API returned.
+                </p>
               </div>`
             :`<div style="padding:10px 16px;border-bottom:1px solid #1e293b;display:flex;align-items:center;justify-content:space-between;">
                 <button style="font-size:11px;color:#64748b;background:none;border:none;cursor:pointer;font-family:inherit;text-decoration:underline;" onclick="selectAllImports()">
