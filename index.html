@@ -1551,9 +1551,50 @@ async function bambuFetchTasks(after=0,limit=20){
       },
     });
     if(res.status===401){
+      // Token expired — try to auto-refresh from Firebase before giving up
+      console.warn('bambuFetchTasks: 401, attempting token refresh from Firebase...');
+      try{
+        const fbRes=await fetch('https://d-manager-5afba-default-rtdb.asia-southeast1.firebasedatabase.app/bambu_token.json');
+        const fbData=await fbRes.json();
+        if(fbData?.token && fbData.token!==token){
+          // Firebase has a newer token — retry once with it
+          console.log('Got fresh token from Firebase, retrying...');
+          S.settings.bambuToken=fbData.token;
+          cacheLocal();
+          const retry=await fetch(BAMBU_PROXY,{
+            method:'GET',
+            headers:{
+              'Authorization':`Bearer ${fbData.token}`,
+              'X-Target':`/v1/iot-service/api/user/task?after=${after}&limit=${limit}`,
+            },
+          });
+          if(retry.status===401){
+            // Fresh token also rejected — token in Firebase is stale, clear it
+            S.settings.bambuToken=null;
+            cacheLocal();
+            toast('❌ Bambu session expired — click "Connect to Bambu Cloud" to refresh','err');
+            render();
+            return null;
+          }
+          // Swap response for the rest of the function to process
+          const raw2=await retry.json();
+          console.log('Bambu tasks raw response (retry):',JSON.stringify(raw2));
+          const payload2=(raw2.data&&typeof raw2.data==='object')?raw2.data:raw2;
+          const hits2=Array.isArray(payload2.hits)?payload2.hits:[];
+          const total2=typeof payload2.total==='number'?payload2.total:hits2.length;
+          const isOk2=raw2.message==='success'||raw2.code===0||raw2.code===null||
+                      payload2.message==='success'||Array.isArray(payload2.hits)||
+                      typeof payload2.total==='number';
+          if(!isOk2){toast(`Bambu: ${raw2.message||JSON.stringify(raw2).slice(0,80)}`,'warn');return null;}
+          return {hits:hits2,total:total2};
+        }
+      }catch(fbErr){
+        console.warn('Firebase token refresh failed:',fbErr);
+      }
+      // Firebase also has no fresh token
       S.settings.bambuToken=null;
       cacheLocal();
-      toast('Bambu session expired — please reconnect','warn');
+      toast('❌ Bambu session expired — click "Connect to Bambu Cloud" to refresh','err');
       render();
       return null;
     }
